@@ -6,7 +6,7 @@ from Discriminator import Discriminator
 from target_lstm import TARGET_LSTM
 from target_lstm20 import TARGET_LSTM20
 from LeakGANModel import  LeakGAN
-import cPickle
+import pickle
 import os
 
 
@@ -14,7 +14,7 @@ import os
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_boolean('restore', False, 'Training or testing a model')
+flags.DEFINE_boolean('restore', True, 'Training or testing a model')
 flags.DEFINE_boolean('resD', False, 'Training or testing a D model')
 flags.DEFINE_integer('length', 20, 'The length of toy data')
 flags.DEFINE_string('model', "", 'Model NAME')
@@ -66,11 +66,12 @@ dis_batch_size = 64
 #  Basic Training Parameters
 #########################################################################################
 TOTAL_BATCH = 800
-positive_file = 'save/real_data.txt'
-negative_file = 'save/generator_sample.txt'
-eval_file = 'save/eval_file.txt'
+positive_file = 'tmp/real_data.txt'
+negative_file = 'tmp/generator_sample.txt'
+eval_file = 'tmp/eval_file.txt'
 generated_num = 10000
-model_path = './ckpts'
+model_path = './ckpts/test'
+LOG_FILE = os.path.join(model_path, 'experiment-log.txt')
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file,train = 1):
     # Generate Samples
@@ -133,7 +134,7 @@ def rescale( reward, rollout_num=1.0):
 def get_reward(model,dis, sess, input_x, rollout_num, dis_dropout_keep_prob):
     rewards = []
     for i in range(rollout_num):
-        for given_num in range(1, model.sequence_length / model.step_size):
+        for given_num in range(1, model.sequence_length // model.step_size):
             real_given_num = given_num * model.step_size
             feed = {model.x: input_x, model.given_num: real_given_num, model.drop_out: 1.0}
             samples = sess.run(model.gen_for_reward, feed)
@@ -153,7 +154,7 @@ def get_reward(model,dis, sess, input_x, rollout_num, dis_dropout_keep_prob):
         if i == 0:
             rewards.append(ypred)
         else:
-            rewards[model.sequence_length / model.step_size - 1] += ypred
+            rewards[model.sequence_length // model.step_size - 1] += ypred
     rewards = rescale(np.array(rewards), rollout_num)
     rewards = np.transpose(np.array(rewards)) / (1.0 * rollout_num)  # batch_size x seq_length
     return rewards
@@ -166,8 +167,8 @@ def main():
     gen_data_loader = Gen_Data_loader(BATCH_SIZE,FLAGS.length)
     likelihood_data_loader = Gen_Data_loader(BATCH_SIZE,FLAGS.length) # For testing
     vocab_size = 5000
-    file = open('save/target_params.pkl', 'rb')
-    target_params = cPickle.load(file)
+    file = open('save/target_params_py3.pkl', 'rb')
+    target_params = pickle.load(file)
     
     dis_data_loader = Dis_dataloader(BATCH_SIZE,SEQ_LENGTH)
     discriminator = Discriminator(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
@@ -181,7 +182,7 @@ def main():
         target_lstm = TARGET_LSTM20(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN,target_params)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 0.5
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.5
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
     generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file, 0)
@@ -191,7 +192,7 @@ def main():
 
         print("epoch:",a,"  ")
 
-    log = open('save/experiment-log.txt', 'w')
+    log = open(LOG_FILE, 'w')
     gen_data_loader.create_batches(positive_file)
     saver_variables = tf.global_variables()
     saver = tf.train.Saver(saver_variables)
@@ -200,75 +201,75 @@ def main():
     if FLAGS.restore and model:
         # model = tf.train.latest_checkpoint(model_path)
         # if model and FLAGS.restore:
-        if model_path+'/' + FLAGS.model:
-            print(model_path+'/' + FLAGS.model)
-            saver.restore(sess, model_path+'/' + FLAGS.model)
-        else:
+        # if model_path+'/' + FLAGS.model:
+        #     print(model_path+'/' + FLAGS.model)
+        #     saver.restore(sess, model_path+'/' + FLAGS.model)
+        # else:
             saver.restore(sess, model)
     else:
         if FLAGS.resD and model_path + '/' + FLAGS.model:
-                print(model_path + '/' + FLAGS.model)
-                saver.restore(sess, model_path + '/' + FLAGS.model)
+            print(model_path + '/' + FLAGS.model)
+            saver.restore(sess, model_path + '/' + FLAGS.model)
 
+            print('Start pre-training...')
+            log.write('pre-training...\n')
+            for epoch in range(PRE_EPOCH_NUM):
+                loss = pre_train_epoch(sess, leakgan, gen_data_loader)
+                if epoch % 5 == 0:
+                    generate_samples(sess, leakgan, BATCH_SIZE, generated_num, eval_file, 0)
+                    likelihood_data_loader.create_batches(eval_file)
+                    test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
+                    print('pre-train epoch ', epoch, 'test_loss ', test_loss)
+                    buffer = 'epoch:\t' + str(epoch) + '\tnll:\t' + str(test_loss) + '\n'
+                    log.write(buffer)
+                    generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, eval_file, 0)
+                    likelihood_data_loader.create_batches(eval_file)
+                    test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
+                    print("Groud-Truth:", test_loss)
+            saver.save(sess, model_path + '/leakgan_pre')
+        else:
+            print('Start pre-training discriminator...')
+            # Train 3 epoch on the generated data and do this for 50 times
+            for i in range(10):
+                for _ in range(5):
+                    generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
+                    generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
+                    # gen_data_loader.create_batches(positive_file)
+                    dis_data_loader.load_train_data(positive_file, negative_file)
+                    for _ in range(3):
+                        dis_data_loader.reset_pointer()
+                        for it in range(dis_data_loader.num_batch):
+                            x_batch, y_batch = dis_data_loader.next_batch()
+                            feed = {
+                                discriminator.D_input_x: x_batch,
+                                discriminator.D_input_y: y_batch,
+                                discriminator.dropout_keep_prob: dis_dropout_keep_prob
+                            }
+                            D_loss,_ = sess.run([discriminator.D_loss,discriminator.D_train_op], feed)
+                    print ('D_loss ', D_loss)
+                    buffer =  str(D_loss) + '\n'
+                    log.write(buffer)
+                    leakgan.update_feature_function(discriminator)
+                saver.save(sess, model_path + '/leakgan_preD')
+
+                # saver.save(sess, model_path + '/leakgan')
+                #  pre-train generator
                 print('Start pre-training...')
                 log.write('pre-training...\n')
-                for epoch in range(PRE_EPOCH_NUM):
+                for epoch in range(PRE_EPOCH_NUM // 10):
                     loss = pre_train_epoch(sess, leakgan, gen_data_loader)
                     if epoch % 5 == 0:
-                        generate_samples(sess, leakgan, BATCH_SIZE, generated_num, eval_file, 0)
+                        generate_samples(sess, leakgan, BATCH_SIZE, generated_num, eval_file,0)
                         likelihood_data_loader.create_batches(eval_file)
                         test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
                         print('pre-train epoch ', epoch, 'test_loss ', test_loss)
-                        buffer = 'epoch:\t' + str(epoch) + '\tnll:\t' + str(test_loss) + '\n'
+                        buffer = 'epoch:\t'+ str(epoch) + '\tnll:\t' + str(test_loss) + '\n'
                         log.write(buffer)
                         generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, eval_file, 0)
                         likelihood_data_loader.create_batches(eval_file)
                         test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
                         print("Groud-Truth:", test_loss)
-                saver.save(sess, model_path + '/leakgan_pre')
-        else:
-                print('Start pre-training discriminator...')
-                # Train 3 epoch on the generated data and do this for 50 times
-                for i in range(10):
-                    for _ in range(5):
-                        generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
-                        generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
-                        # gen_data_loader.create_batches(positive_file)
-                        dis_data_loader.load_train_data(positive_file, negative_file)
-                        for _ in range(3):
-                            dis_data_loader.reset_pointer()
-                            for it in range(dis_data_loader.num_batch):
-                                x_batch, y_batch = dis_data_loader.next_batch()
-                                feed = {
-                                    discriminator.D_input_x: x_batch,
-                                    discriminator.D_input_y: y_batch,
-                                    discriminator.dropout_keep_prob: dis_dropout_keep_prob
-                                }
-                                D_loss,_ = sess.run([discriminator.D_loss,discriminator.D_train_op], feed)
-                                # # print 'D_loss ', D_loss
-                                # buffer =  str(D_loss) + '\n'
-                                # log.write(buffer)
-                        leakgan.update_feature_function(discriminator)
-                    saver.save(sess, model_path + '/leakgan_preD')
-
-            # saver.save(sess, model_path + '/leakgan')
-        #  pre-train generator
-                    print('Start pre-training...')
-                    log.write('pre-training...\n')
-                    for epoch in range(PRE_EPOCH_NUM/10):
-                        loss = pre_train_epoch(sess, leakgan, gen_data_loader)
-                        if epoch % 5 == 0:
-                            generate_samples(sess, leakgan, BATCH_SIZE, generated_num, eval_file,0)
-                            likelihood_data_loader.create_batches(eval_file)
-                            test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-                            print('pre-train epoch ', epoch, 'test_loss ', test_loss)
-                            buffer = 'epoch:\t'+ str(epoch) + '\tnll:\t' + str(test_loss) + '\n'
-                            log.write(buffer)
-                            generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, eval_file, 0)
-                            likelihood_data_loader.create_batches(eval_file)
-                            test_loss = target_loss(sess, target_lstm, likelihood_data_loader)
-                            print("Groud-Truth:", test_loss)
-                saver.save(sess, model_path + '/leakgan_pre')
+            saver.save(sess, model_path + '/leakgan_pre')
 
     gencircle = 1
     #

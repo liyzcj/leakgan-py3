@@ -1,9 +1,12 @@
 # LeakGAN
 
 ## Requirements: 
-* **Tensorflow r1.2.1**
-* Python 2.7
-* CUDA 7.5+ (For GPU)
+* **Tensorflow r1.13.1**
+* Python 3.6
+* CUDA 10.0+ (For GPU)
+
+## LICENSE
+Convert to python3 version from origin [repo](https://github.com/CR-Gjx/LeakGAN)
 
 ## Introduction
 This is the synthetic data experiment of LeakGAN.
