@@ -9,7 +9,9 @@ from LeakGANModel import  LeakGAN
 import pickle
 import os
 
-
+## Ignore TensorFlow logging
+tf.logging.set_verbosity(tf.logging.ERROR)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 #import numexpr as ne
 
 flags = tf.app.flags
@@ -159,6 +161,66 @@ def get_reward(model,dis, sess, input_x, rollout_num, dis_dropout_keep_prob):
     rewards = np.transpose(np.array(rewards)) / (1.0 * rollout_num)  # batch_size x seq_length
     return rewards
 
+## 将文件中的句子分割成不同长度句子
+def split_sentence_file(input_file, output_file):
+    # Load data
+    print("start split for file :", input_file)
+    datasets = []
+    with open(input_file)as fin:
+        for line in fin:
+            line = line.strip()
+            line = line.split()
+            parse_line = [int(x) for x in line]
+            for i in range(2, SEQ_LENGTH+1):
+                data = parse_line[:i] + [0] * (SEQ_LENGTH-i)
+                datasets.append(data)
+    with open(output_file, 'w') as fout:
+        for data in datasets:
+            buffer = ' '.join([str(x) for x in data]) + '\n'
+            fout.write(buffer)
+    print("success!!!!!!")
+
+## 将句子分割成不同长度片段 !注意, 这里应该将句子分成 SEQ_LENGTH个, 一个单词也有奖励
+# , 一个单词分类器可以判断这个单词在开头是不是合理.
+def split_sentence(input_data):
+    """
+    input_data: numpy.array with [batch_size x seq_length]
+    """
+    # make sure this is 2d array
+    assert input_data.ndim == 2
+    # Load data 
+    # TO-DO better padding with numpy
+    datasets = []
+    for line in input_data:
+        for i in range(1, SEQ_LENGTH+1):
+            data = np.pad(line[:i], (0, SEQ_LENGTH-i), 'constant')
+            datasets.append(data)
+    return datasets
+  
+# 将句子分段, 并从判别器获取奖励
+def get_rewords_from_discriminator(sess, input_x, discriminator):
+    """computing rewards for a batch of sentenses
+    Input:
+        sess: a TensorFlow Session
+        input_x: [batch_size x seq_length], a batch of generated sentences
+        discriminator: a discriminator object
+    Return:
+        rewards: the rewards of input_x, [batch_size x seq_length]
+    """
+    rewards = []  # batch_size x seq_length
+    split_data = split_sentence(input_x) # split data as [SEQ_LENGTH*BATCH_SIZE, SEQ_LENGTH]
+    for given_num in range(1, SEQ_LENGTH+1):
+        batch_data = [] # batch_size x seq_length
+        for i in range(BATCH_SIZE):
+            batch_data.append(split_data[i*SEQ_LENGTH+given_num-1])
+        feed = {discriminator.input_x: batch_data, discriminator.dropout_keep_prob: 1.0}
+        ypred_for_auc = sess.run(discriminator.ypred_for_auc, feed)
+        ypred = np.array([item[1] for item in ypred_for_auc])
+        rewards.append(ypred) # seq_length x batch_size
+    rewards = np.transpose(np.array(rewards)) # batch_size x seq_length
+    return rewards
+
+
 def main():
     random.seed(SEED)
     np.random.seed(SEED)
@@ -167,8 +229,8 @@ def main():
     gen_data_loader = Gen_Data_loader(BATCH_SIZE,FLAGS.length)
     likelihood_data_loader = Gen_Data_loader(BATCH_SIZE,FLAGS.length) # For testing
     vocab_size = 5000
-    file = open('save/target_params_py3.pkl', 'rb')
-    target_params = pickle.load(file)
+    with open('save/target_params_py3.pkl', 'rb') as f:
+        target_params = pickle.load(f)
     
     dis_data_loader = Dis_dataloader(BATCH_SIZE,SEQ_LENGTH)
     discriminator = Discriminator(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
