@@ -69,7 +69,9 @@ dis_batch_size = 64
 #########################################################################################
 TOTAL_BATCH = 800
 positive_file = 'tmp/real_data.txt'
+positive_file_split = 'tmp/real_data.txt.split'
 negative_file = 'tmp/generator_sample.txt'
+negative_file_split = 'tmp/generator_sample.txt.split'
 eval_file = 'tmp/eval_file.txt'
 generated_num = 10000
 model_path = './ckpts/test'
@@ -213,7 +215,7 @@ def get_rewords_from_discriminator(sess, input_x, discriminator):
         batch_data = [] # batch_size x seq_length
         for i in range(BATCH_SIZE):
             batch_data.append(split_data[i*SEQ_LENGTH+given_num-1])
-        feed = {discriminator.input_x: batch_data, discriminator.dropout_keep_prob: 1.0}
+        feed = {discriminator.D_input_x: batch_data, discriminator.dropout_keep_prob: 1.0}
         ypred_for_auc = sess.run(discriminator.ypred_for_auc, feed)
         ypred = np.array([item[1] for item in ypred_for_auc])
         rewards.append(ypred) # seq_length x batch_size
@@ -234,9 +236,9 @@ def main():
     
     dis_data_loader = Dis_dataloader(BATCH_SIZE,SEQ_LENGTH)
     discriminator = Discriminator(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
-                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,step_size=4)
+                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,step_size=1)
     leakgan = LeakGAN(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,emb_dim=EMB_DIM,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
-                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,goal_size=GOAL_SIZE,step_size=4,D_model=discriminator,
+                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,goal_size=GOAL_SIZE,step_size=1,D_model=discriminator,
                       learning_rate=LEARNING_RATE)
     if SEQ_LENGTH == 40:
         target_lstm = TARGET_LSTM(vocab_size, BATCH_SIZE, EMB_DIM, HIDDEN_DIM, SEQ_LENGTH, START_TOKEN)  # The oracle model
@@ -256,6 +258,7 @@ def main():
 
     log = open(LOG_FILE, 'w')
     gen_data_loader.create_batches(positive_file)
+    # saver
     saver_variables = tf.global_variables()
     saver = tf.train.Saver(saver_variables)
     model = tf.train.latest_checkpoint(model_path)
@@ -296,8 +299,11 @@ def main():
                 for _ in range(5):
                     generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
                     generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
+                    split_sentence_file(positive_file, positive_file_split)
+                    split_sentence_file(negative_file, negative_file_split)
                     # gen_data_loader.create_batches(positive_file)
-                    dis_data_loader.load_train_data(positive_file, negative_file)
+                    # dis_data_loader.load_train_data(positive_file, negative_file)
+                    dis_data_loader.load_train_data(positive_file_split, negative_file_split)
                     for _ in range(3):
                         dis_data_loader.reset_pointer()
                         for it in range(dis_data_loader.num_batch):
@@ -344,7 +350,8 @@ def main():
 
             for gi in range(gencircle):
                 samples = leakgan.generate(sess,1.0,1)
-                rewards = get_reward(leakgan, discriminator,sess, samples, 4, dis_dropout_keep_prob)
+                # rewards = get_reward(leakgan, discriminator,sess, samples, 4, dis_dropout_keep_prob)
+                rewards = get_rewords_from_discriminator(sess, samples, discriminator)
                 feed = {leakgan.x: samples, leakgan.reward: rewards,leakgan.drop_out:1.0}
                 _,_,g_loss,w_loss = sess.run([leakgan.manager_updates,leakgan.worker_updates,leakgan.goal_loss,leakgan.worker_loss], feed_dict=feed)
                 print('total_batch: ', total_batch, "  ",g_loss,"  ", w_loss)
@@ -366,7 +373,10 @@ def main():
         for _ in range(5):
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
             generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
-            dis_data_loader.load_train_data(positive_file, negative_file)
+            split_sentence_file(positive_file, positive_file_split)
+            split_sentence_file(negative_file, negative_file_split)
+            # dis_data_loader.load_train_data(positive_file, negative_file)
+            dis_data_loader.load_train_data(positive_file_split, negative_file_split)
 
             for _ in range(3):
                 dis_data_loader.reset_pointer()
