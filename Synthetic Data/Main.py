@@ -16,7 +16,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_boolean('restore', True, 'Training or testing a model')
+flags.DEFINE_boolean('restore', False, 'Training or testing a model')
 flags.DEFINE_boolean('resD', False, 'Training or testing a D model')
 flags.DEFINE_integer('length', 20, 'The length of toy data')
 flags.DEFINE_string('model', "", 'Model NAME')
@@ -74,7 +74,7 @@ negative_file = 'tmp/generator_sample.txt'
 negative_file_split = 'tmp/generator_sample.txt.split'
 eval_file = 'tmp/eval_file.txt'
 generated_num = 10000
-model_path = './ckpts/test'
+model_path = './ckpts/test2'
 LOG_FILE = os.path.join(model_path, 'experiment-log.txt')
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file,train = 1):
@@ -295,8 +295,8 @@ def main():
         else:
             print('Start pre-training discriminator...')
             # Train 3 epoch on the generated data and do this for 50 times
-            for i in range(10):
-                for _ in range(5):
+            for i in range(4):  # 10 
+                for _ in range(2):  # 5
                     generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
                     generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
                     split_sentence_file(positive_file, positive_file_split)
@@ -304,7 +304,7 @@ def main():
                     # gen_data_loader.create_batches(positive_file)
                     # dis_data_loader.load_train_data(positive_file, negative_file)
                     dis_data_loader.load_train_data(positive_file_split, negative_file_split)
-                    for _ in range(3):
+                    for _ in range(1): # 3
                         dis_data_loader.reset_pointer()
                         for it in range(dis_data_loader.num_batch):
                             x_batch, y_batch = dis_data_loader.next_batch()
@@ -324,7 +324,7 @@ def main():
                 #  pre-train generator
                 print('Start pre-training...')
                 log.write('pre-training...\n')
-                for epoch in range(PRE_EPOCH_NUM // 10):
+                for epoch in range(PRE_EPOCH_NUM // 4):  # 10
                     loss = pre_train_epoch(sess, leakgan, gen_data_loader)
                     if epoch % 5 == 0:
                         generate_samples(sess, leakgan, BATCH_SIZE, generated_num, eval_file,0)
@@ -339,7 +339,7 @@ def main():
                         print("Groud-Truth:", test_loss)
             saver.save(sess, model_path + '/leakgan_pre')
 
-    gencircle = 1
+    gencircle = 2 # 1
     #
     print('#########################################################################')
     print('Start Adversarial Training...')
@@ -370,7 +370,7 @@ def main():
             print("Groud-Truth:" ,test_loss)
 
         # Train the discriminator
-        for _ in range(5):
+        for _ in range(1): # 5
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
             generate_samples(sess, target_lstm, BATCH_SIZE, generated_num, positive_file,0)
             split_sentence_file(positive_file, positive_file_split)
@@ -378,7 +378,7 @@ def main():
             # dis_data_loader.load_train_data(positive_file, negative_file)
             dis_data_loader.load_train_data(positive_file_split, negative_file_split)
 
-            for _ in range(3):
+            for _ in range(1): # 3
                 dis_data_loader.reset_pointer()
                 for it in range(dis_data_loader.num_batch):
                     x_batch, y_batch = dis_data_loader.next_batch()
@@ -388,7 +388,7 @@ def main():
                         discriminator.dropout_keep_prob: dis_dropout_keep_prob
                     }
                     D_loss, _ = sess.run([discriminator.D_loss, discriminator.D_train_op], feed)
-                    # print 'D_loss ', D_loss
+            print ('D_loss ', D_loss)
             leakgan.update_feature_function(discriminator)
     log.close()
 
