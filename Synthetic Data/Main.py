@@ -173,7 +173,7 @@ def split_sentence_file(input_file, output_file):
             line = line.strip()
             line = line.split()
             parse_line = [int(x) for x in line]
-            for i in range(2, SEQ_LENGTH+1):
+            for i in range(1, SEQ_LENGTH+1):
                 data = parse_line[:i] + [0] * (SEQ_LENGTH-i)
                 datasets.append(data)
     with open(output_file, 'w') as fout:
