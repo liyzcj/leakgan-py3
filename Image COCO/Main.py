@@ -8,6 +8,10 @@ import pickle
 import os
 #import numexpr as ne
 
+## Ignore TensorFlow logging
+tf.logging.set_verbosity(tf.logging.ERROR)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_boolean('restore', False, 'Training or testing a model')
@@ -20,7 +24,7 @@ EMB_DIM = 128 # embedding dimension
 HIDDEN_DIM = 128 # hidden state dimension of lstm cell
 SEQ_LENGTH = 32 # sequence length
 START_TOKEN = 0
-PRE_EPOCH_NUM = 200 # supervise (maximum likelihood estimation) epochs
+PRE_EPOCH_NUM = 200 #200 supervise (maximum likelihood estimation) epochs
 SEED = 88
 BATCH_SIZE = 64
 
@@ -49,6 +53,9 @@ negative_file = 'save/generator_sample.txt'
 generated_num = 10000
 model_path = './ckpts/test'
 LOG_FILE = os.path.join(model_path, 'experiment-log.txt')
+
+if not os.path.exists(model_path):
+    os.mkdir(model_path)
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file,train = 1):
     # Generate Samples
@@ -204,8 +211,8 @@ def main():
         else:
             print('Start pre-training discriminator...')
             # Train 3 epoch on the generated data and do this for 50 times
-            for i in range(10):
-                for _ in range(5):
+            for i in range(10):  # 10
+                for _ in range(5): # 5
                     generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
                     # gen_data_loader.create_batches(positive_file)
                     dis_data_loader.load_train_data(positive_file, negative_file)
@@ -259,14 +266,14 @@ def main():
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, "./save/coco_" + str(total_batch) + ".txt", 0)
             saver.save(sess, model_path + '/leakgan', global_step=total_batch)
         if total_batch % 15 == 0:
-             for epoch in xrange(1):
+             for epoch in range(1):
                  loss = pre_train_epoch(sess, leakgan, gen_data_loader)
         # Train the discriminator
-        for _ in range(5):
+        for _ in range(5): # 5
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
             dis_data_loader.load_train_data(positive_file, negative_file)
 
-            for _ in range(3):
+            for _ in range(3): # 3
                 dis_data_loader.reset_pointer()
                 for it in range(dis_data_loader.num_batch):
                     x_batch, y_batch = dis_data_loader.next_batch()
@@ -276,7 +283,7 @@ def main():
                         discriminator.dropout_keep_prob: dis_dropout_keep_prob
                     }
                     D_loss, _ = sess.run([discriminator.D_loss, discriminator.D_train_op], feed)
-                    # print 'D_loss ', D_loss
+            print ('D_loss ', D_loss)
             leakgan.update_feature_function(discriminator)
     log.close()
 
