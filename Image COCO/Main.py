@@ -211,8 +211,8 @@ def main():
         else:
             print('Start pre-training discriminator...')
             # Train 3 epoch on the generated data and do this for 50 times
-            for i in range(10):  # 10
-                for _ in range(5): # 5
+            for i in range(1):  # 10
+                for _ in range(1): # 5
                     generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
                     # gen_data_loader.create_batches(positive_file)
                     dis_data_loader.load_train_data(positive_file, negative_file)
@@ -236,7 +236,7 @@ def main():
                 #  pre-train generator
                 print('Start pre-training...')
                 log.write('pre-training...\n')
-                for epoch in range(PRE_EPOCH_NUM // 16):
+                for epoch in range(PRE_EPOCH_NUM // 200):
                     loss = pre_train_epoch(sess, leakgan, gen_data_loader)
                     if epoch % 5 == 0:
                         generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
@@ -269,11 +269,11 @@ def main():
              for epoch in range(1):
                  loss = pre_train_epoch(sess, leakgan, gen_data_loader)
         # Train the discriminator
-        for _ in range(5): # 5
+        for _ in range(1): # 5
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
             dis_data_loader.load_train_data(positive_file, negative_file)
 
-            for _ in range(3): # 3
+            for _ in range(1): # 3
                 dis_data_loader.reset_pointer()
                 for it in range(dis_data_loader.num_batch):
                     x_batch, y_batch = dis_data_loader.next_batch()
