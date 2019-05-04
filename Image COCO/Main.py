@@ -7,6 +7,7 @@ from LeakGANModel import  LeakGAN
 import pickle
 import os
 #import numexpr as ne
+from split_sentence import get_rewords_from_discriminator, split_sentence_file
 
 ## Ignore TensorFlow logging
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -14,7 +15,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_boolean('restore', False, 'Training or testing a model')
+flags.DEFINE_boolean('restore', True, 'Training or testing a model')
 flags.DEFINE_boolean('resD', False, 'Training or testing a D model')
 flags.DEFINE_string('model', "", 'Model NAME')
 #########################################################################################
@@ -48,14 +49,18 @@ dis_batch_size = 64
 #  Basic Training Parameters
 #########################################################################################
 TOTAL_BATCH = 800
-positive_file = 'save/realtrain_cotra.txt'
-negative_file = 'save/generator_sample.txt'
+positive_file = 'tmp/realtrain_cotra.txt'
+positive_file_split = 'tmp/realtrain_cotra.split.txt'
+negative_file = 'tmp/generator_sample.txt'
+negative_file_split = 'tmp/generator_sample.split.txt'
 generated_num = 10000
-model_path = './ckpts/test'
+model_path = './ckpts/test2'
 LOG_FILE = os.path.join(model_path, 'experiment-log.txt')
 
 if not os.path.exists(model_path):
     os.mkdir(model_path)
+    os.mkdir(model_path+'/samples')
+    os.mkdir(model_path+'/speech')
 
 def generate_samples(sess, trainable_model, batch_size, generated_num, output_file,train = 1):
     # Generate Samples
@@ -165,9 +170,9 @@ def main():
     vocab_size = 4839
     dis_data_loader = Dis_dataloader(BATCH_SIZE,SEQ_LENGTH)
     discriminator = Discriminator(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
-                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,step_size=4)
+                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,step_size=1)
     leakgan = LeakGAN(SEQ_LENGTH,num_classes=2,vocab_size=vocab_size,emb_dim=EMB_DIM,dis_emb_dim=dis_embedding_dim,filter_sizes=dis_filter_sizes,num_filters=dis_num_filters,
-                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,goal_size=GOAL_SIZE,step_size=4,D_model=discriminator)
+                        batch_size=BATCH_SIZE,hidden_dim=HIDDEN_DIM,start_token=START_TOKEN,goal_out_size=GOAL_OUT_SIZE,goal_size=GOAL_SIZE,step_size=1,D_model=discriminator)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -211,12 +216,17 @@ def main():
         else:
             print('Start pre-training discriminator...')
             # Train 3 epoch on the generated data and do this for 50 times
-            for i in range(1):  # 10
-                for _ in range(1): # 5
+            for i in range(8):  # 16
+                for _ in range(2): # 5
                     generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
+                    # 分割负样本
+                    split_sentence_file(negative_file, negative_file_split, SEQ_LENGTH, 1814)
                     # gen_data_loader.create_batches(positive_file)
-                    dis_data_loader.load_train_data(positive_file, negative_file)
-                    for _ in range(3):
+                    # 采用分割后的样本训练判别器
+                    dis_data_loader.load_train_data(positive_file_split, negative_file_split)
+                    # print(dis_data_loader.next_batch())
+                    # dis_data_loader.load_train_data(positive_file, negative_file)
+                    for _ in range(2): # 3
                         dis_data_loader.reset_pointer()
                         for it in range(dis_data_loader.num_batch):
                             x_batch, y_batch = dis_data_loader.next_batch()
@@ -226,9 +236,9 @@ def main():
                                 discriminator.dropout_keep_prob: dis_dropout_keep_prob
                             }
                             D_loss,_ = sess.run([discriminator.D_loss,discriminator.D_train_op], feed)
-                    print ('D_loss ', D_loss)
-                    buffer =  str(D_loss) + '\n'
-                    log.write(buffer)
+                        print ('D_loss ', D_loss)
+                        buffer =  str(D_loss) + '\n'
+                        log.write(buffer)
                     leakgan.update_feature_function(discriminator)
                 saver.save(sess, model_path + '/leakgan_preD')
 
@@ -236,7 +246,7 @@ def main():
                 #  pre-train generator
                 print('Start pre-training...')
                 log.write('pre-training...\n')
-                for epoch in range(PRE_EPOCH_NUM // 200):
+                for epoch in range(PRE_EPOCH_NUM // 8):
                     loss = pre_train_epoch(sess, leakgan, gen_data_loader)
                     if epoch % 5 == 0:
                         generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
@@ -252,18 +262,20 @@ def main():
     log.write('adversarial training...\n')
     for total_batch in range(TOTAL_BATCH):
         # Train the generator for one step
-        for it in range(1):
+        for it in range(2):
 
             for gi in range(gencircle):
                 samples = leakgan.generate(sess,1.0,1)
-                rewards = get_reward(leakgan, discriminator,sess, samples, 4, dis_dropout_keep_prob,total_batch,gen_data_loader)
+                # rewards = get_reward(leakgan, discriminator,sess, samples, 4, dis_dropout_keep_prob,total_batch,gen_data_loader)
+                # 通过判别器获取奖励
+                rewards = get_rewords_from_discriminator(sess, samples, discriminator, SEQ_LENGTH, BATCH_SIZE, 1814)
                 feed = {leakgan.x: samples, leakgan.reward: rewards,leakgan.drop_out:1.0}
                 _,_,g_loss,w_loss = sess.run([leakgan.manager_updates,leakgan.worker_updates,leakgan.goal_loss,leakgan.worker_loss], feed_dict=feed)
                 print('total_batch: ', total_batch, "  ",g_loss,"  ", w_loss)
 
         # Test
         if total_batch % 10 == 1 or total_batch == TOTAL_BATCH - 1:
-            generate_samples(sess, leakgan, BATCH_SIZE, generated_num, "./save/coco_" + str(total_batch) + ".txt", 0)
+            generate_samples(sess, leakgan, BATCH_SIZE, generated_num, model_path + "/samples/coco_" + str(total_batch) + ".txt", 0)
             saver.save(sess, model_path + '/leakgan', global_step=total_batch)
         if total_batch % 15 == 0:
              for epoch in range(1):
@@ -271,9 +283,11 @@ def main():
         # Train the discriminator
         for _ in range(1): # 5
             generate_samples(sess, leakgan, BATCH_SIZE, generated_num, negative_file,0)
-            dis_data_loader.load_train_data(positive_file, negative_file)
+            # 使用分割后的样本训练判别器.
+            split_sentence_file(negative_file, negative_file_split, SEQ_LENGTH, 1814)
+            dis_data_loader.load_train_data(positive_file_split, negative_file_split)
 
-            for _ in range(1): # 3
+            for _ in range(2): # 3
                 dis_data_loader.reset_pointer()
                 for it in range(dis_data_loader.num_batch):
                     x_batch, y_batch = dis_data_loader.next_batch()
@@ -283,7 +297,7 @@ def main():
                         discriminator.dropout_keep_prob: dis_dropout_keep_prob
                     }
                     D_loss, _ = sess.run([discriminator.D_loss, discriminator.D_train_op], feed)
-            print ('D_loss ', D_loss)
+                print ('D_loss ', D_loss)
             leakgan.update_feature_function(discriminator)
     log.close()
 
