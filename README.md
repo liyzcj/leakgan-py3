@@ -3,8 +3,8 @@ The code of research paper [Long Text Generation via Adversarial Training with L
 
 This paper has been accepted at the Thirty-Second AAAI Conference on Artificial Intelligence ([AAAI-18](https://aaai.org/Conferences/AAAI-18/)).
 ## Requirements
-* **Tensorflow r1.2.1**
-* Python 2.7
+* **Tensorflow r1.13.1**
+* Python 3.6
 * CUDA 7.5+ (For GPU)
 
 ## Introduction
